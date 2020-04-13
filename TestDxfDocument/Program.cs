@@ -28,228 +28,384 @@ namespace TestDxfDocument
     {
         public static void Main()
         {
-            DxfDocument doc = Test(@"sample.dxf");
+            DxfDocument doc = DxfDocument.Load(@"3556_00X.dxf");
+            //Console.WriteLine(doc.Layers.Names.Count);
+            //ShowDxfDocumentInformation(doc);
+            List<MText> mTexts = doc.MTexts.ToList<MText>();
+            List<string[]> roomTags = new List<string[]>();
+            for (int i = 0; i < mTexts.Count(); i++)
+            {
+                MText mText = mTexts[i];
+                if (mText.Layer.ToString() == "RM$TXT")
+                {
+                    string room = mText.Value.Substring(0, mText.Value.IndexOf(@"^M\P"));
+                    string areaStr = mText.Value.Substring(mText.Value.IndexOf(@"^M\P")).Substring(4);
+                    areaStr = areaStr.Substring(0, areaStr.IndexOf(@"^M\P"));
+                    string[] roomTag = { room, areaStr, mText.Position.X.ToString(), mText.Position.Y.ToString() };
+                    roomTags.Add(roomTag);
+                    //double area = Convert.ToDouble(areaStr);
+                }
+                else
+                {
+                    mTexts.RemoveAt(i);
+                    i--;
+                }
+            }
+            List<LwPolyline> lwPolylines = doc.LwPolylines.ToList<LwPolyline>();
+            int startingRoomTags = roomTags.Count();
+            int startingLwPolylines = lwPolylines.Count();
+            using (System.IO.StreamWriter file =
+            new System.IO.StreamWriter(@"C:\Users\Nikola Naumovski\Desktop\3556_00X.json"))
+            {
+                file.WriteLine("{");
+                file.WriteLine("\t\"BldgNo\": \"3556\",");
+                file.WriteLine("\t\"Floors\": [");
+                file.WriteLine("\t\t{");
+                file.WriteLine("\t\t\t\"FloorNo\": \"00\",");
+                file.WriteLine("\t\t\t\"Rooms\": [");
 
-            #region Samples for new and modified features 2.3.0
+                while (lwPolylines.Count() > 0)
+                {
+                    int count = lwPolylines.Count();
+                    for (int i = 0; i < lwPolylines.Count(); i++)
+                    {
+                        LwPolyline lwPolyline = lwPolylines[i];
+                        List<LwPolylineVertex> lwPolylineVerts = lwPolyline.Vertexes.ToList<LwPolylineVertex>();
+                        if (lwPolyline.Layer.ToString() == "RM$" && lwPolyline.IsClosed)
+                        {
+                            string[] lwPolylineXYLimits = GetLwPolylineXYLimits(lwPolyline);
+                            List<int> matches = new List<int>();
+                            for (int j = 0; j < roomTags.Count(); j++)
+                            {
+                                double xPos = Convert.ToDouble(roomTags[j][2]);
+                                double yPos = Convert.ToDouble(roomTags[j][3]);
+                                double minX = Convert.ToDouble(lwPolylineXYLimits[1]);
+                                double minY = Convert.ToDouble(lwPolylineXYLimits[2]);
+                                double maxX = Convert.ToDouble(lwPolylineXYLimits[3]);
+                                double maxY = Convert.ToDouble(lwPolylineXYLimits[4]);
+                                if (PointWithinLimits(xPos, yPos + 12, minX, minY, maxX, maxY)) matches.Add(j);
+                                if (matches.Count() > 1) break;
+                            }
+                            if (matches.Count() == 1)
+                            {
+                                int j = matches[0];
+                                double tagY = 0 - Convert.ToDouble(roomTags[j][3]);
+                                file.WriteLine("\t\t\t\t{");
+                                file.WriteLine("\t\t\t\t\t\"RoomNo\": \"" + roomTags[j][0] + "\",");
+                                file.WriteLine("\t\t\t\t\t\"RoomSF\": \"" + roomTags[j][1] + "\",");
+                                file.WriteLine("\t\t\t\t\t\"TagX\": \"" + roomTags[j][2] + "\",");
+                                file.WriteLine("\t\t\t\t\t\"TagY\": \"" + tagY + "\",");
+                                file.WriteLine("\t\t\t\t\t\"LwPolyline\": [");
+                                foreach (LwPolylineVertex lwPolylineVert in lwPolylineVerts)
+                                {
+                                    double vertY = 0 - Convert.ToDouble(lwPolylineVert.Position.Y);
+                                    file.WriteLine("\t\t\t\t\t\t{");
+                                    file.WriteLine("\t\t\t\t\t\t\t\"VertX\": \"" + lwPolylineVert.Position.X + "\",");
+                                    file.WriteLine("\t\t\t\t\t\t\t\"VertY\": \"" + vertY + "\",");
+                                    file.WriteLine("\t\t\t\t\t\t\t\"Bulge\": \"" + lwPolylineVert.Bulge + "\"");
+                                    if (lwPolylineVert == lwPolylineVerts[lwPolylineVerts.Count() - 1]) file.WriteLine("\t\t\t\t\t\t}");
+                                    else file.WriteLine("\t\t\t\t\t\t},");
+                                }
+                                file.WriteLine("\t\t\t\t\t]");
+                                if (lwPolyline == lwPolylines[lwPolylines.Count() - 1]) file.WriteLine("\t\t\t\t}");
+                                else file.WriteLine("\t\t\t\t},");
+                                lwPolylines.RemoveAt(i);
+                                roomTags.RemoveAt(j);
+                                i--;
+                            }
+                        }
+                        else
+                        {
+                            lwPolylines.RemoveAt(i);
+                            i--;
+                            startingLwPolylines--;
+                        }
+                    }
+                    if (count == lwPolylines.Count()) break;
+                }
+                file.WriteLine("\t\t\t]");
+                file.WriteLine("\t\t}");
+                file.WriteLine("\t]");
+                file.WriteLine("}");
+                for (int i = 0; i < lwPolylines.Count(); i++)
+                {
+                    LwPolyline lwPolyline = lwPolylines[i];
+                    List<LwPolylineVertex> lwPolylineVerts = lwPolyline.Vertexes.ToList<LwPolylineVertex>();
+                    foreach (LwPolylineVertex lwPolylineVert in lwPolylineVerts)
+                    {
+                        double vertY = 0 - Convert.ToDouble(lwPolylineVert.Position.Y);
+                        Console.Write(lwPolylineVert.Position.X + "\t");
+                        Console.Write(vertY + "\t");
+                        Console.Write(lwPolylineVert.Bulge + "\n");
+                    }
+                    Console.WriteLine("-------------------------------------------------------------------");
+                }
 
-            //ExplodeInsert();
-            //TransformArc();
-            //TransformCircle();
-            //TransformLwPolyline();
-            //TransformEllipse();
-            //AddHeaderVariable();
-            //ViewportTransform();
-            //MLineMirrorAndExplode();
-            //ShapeMirror();
-            //TextMirror();
-            //MTextMirror();
-            //InsertMirror();
-            //LeaderMirror();
+                foreach (string[] roomTag in roomTags)
+                {
+                    Console.WriteLine(roomTag[0] + "\t" + roomTag[1] + "\t" + roomTag[2] + "\t" + roomTag[3]);
+                }
 
-            #endregion
-
-            #region Samples for new and modified features 2.2.1
-
-            //MTextParagraphFormatting();
-            //MTextCharacterFormatting();
-
-            #endregion
-
-            #region Samples for new and modified features 2.2.0
-
-            //AccessModelBlock();
-            //DimensionBlockGeneration();
-
-            #endregion
-
-            #region Samples for new and modified features 2.1.0
-
-            //Shape();
-            //ComplexLineType();
-            //TextStyle();
-            //ReadWriteFromStream();
-            //ReadWriteFromStream2();
-
-            #endregion
-
-            #region Samples for new and modified features 2.0.1
-
-            //DimensionUserTextWithTwoLines();
-
-            #endregion
-
-            #region Samples for new and modified features 2.0
-
-            //Polyline3dAddVertex();
-            //AcadTable();
-            //DimensionStyleOverrides();
-            //ResetLeaderAnnotationPosition();
-
-            #endregion
-
-            #region Samples for new and modified features 1.1.2
-
-            //LinearDimensionTest();
-            //AlignedDimensionTest();
-            //Angular2LineDimensionTest();
-            //Angular3PointDimensionTest();
-            //DiametricDimensionTest();
-            //RadialDimensionTest();
-            //OrdinateDimensionTest();
-
-            #endregion
-
-            #region Samples for new and modified features 1.1.0
-
-            //WipeoutEntity();
-            //ToleranceEntity();
-            //LeaderEntity();
-            //UnderlayEntity();
-            //SplineFitPoints();
-            //ImageClippingBoundary();
-
-            #endregion
-
-            #region Samples for new and modified features 1.0.2
-
-            //AssociativeHatches();
-            //TraceEntity();
-            //SolidEntity();
-
-            #endregion
-
-            #region Samples for new and modified features 1.0.0
-
-            //ModifyingDocumentEntities();
-            //ModifyingBlockProperties();
-            //ModifyingMLineStyles();
-            //DimensionsLinearAndAngularUnits();
-            //ModifyingDimensionGeometryAndStyle();
-            //ModifyingGroups();
-            //ModifyingXData();
-            //DimensionUserText();
-
-            #endregion
-
-            #region Samples for fixes, new and modified features 0.9.3
-
-            //RemoveBlock();
-            //LinearDimension();
-            //AlignedDimension();
-            //Angular2LineDimension();
-            //Angular3PointDimension();
-            //DiametricDimension();
-            //RadialDimension();
-            //OrdinateDimension();
-
-            #endregion
-
-            #region Samples for fixes, new and modified features 0.9.2
-
-            //NurbsEvaluator();
-            //XDataInformation();
-            //DynamicBlocks();
-
-            #endregion
-
-            #region Samples for fixes, new and modified features 0.9.1
-
-            //LoadAndSaveBlocks();
-
-            #endregion
-
-            #region Samples for fixes, new and modified features 0.9.0
-
-            //MakingGroups();
-            //CombiningTwoDrawings();
-            //BinaryChunkXData();
-            //BinaryDxfFiles();
-            //MeshEntity();
-
-            #endregion
-
-            #region Samples for new and modified features 0.8.0
-
-            //MTextEntity();
-            //TransparencySample();
-            //DocumentUnits();
-            //PaperSpace();
-            //BlockWithAttributes();
-
-            #endregion
-
-            #region other
-
-            //NestedBlock();
-            //DimensionNestedBlock();
-            //EncodingTest();
-            //CheckReferences();
-            //ComplexHatch();
-            //RayAndXLine();
-            //UserCoordinateSystems();
-            //ExplodeInsert();
-            //ImageUsesAndRemove();
-            //LayerAndLinetypesUsesAndRemove();
-            //TextAndDimensionStyleUsesAndRemove();
-            //MLineStyleUsesAndRemove();
-            //AppRegUsesAndRemove();
-            //ExplodePolyfaceMesh(); 
-            //ApplicationRegistries();
-            //TestOCStoWCS();
-            //WriteGradientPattern();
-            //WriteGroup();
-            //WriteMLine();
-            //ObjectVisibility();
-            //EntityTrueColor();
-            //EntityLineWeight();
-            //Text();
-            //WriteNoAsciiText();
-            //WriteSplineBoundaryHatch();
-            //WriteNoInsertBlock();
-            //WriteImage();
-            //AddAndRemove();
-            //LoadAndSave();
-            //CleanDrawing();
-            //OrdinateDimensionDrawing();
-            //Angular2LineDimensionDrawing();
-            //Angular3PointDimensionDrawing();
-            //DiametricDimensionDrawing();
-            //RadialDimensionDrawing();
-            //LinearDimensionDrawing();
-            //AlignedDimensionDrawing();
-            //WriteMText();
-            //LineWidth();
-            //HatchCircleBoundary();
-            //ToPolyline();
-            //FilesTest();
-            //CustomHatchPattern();
-            //LoadSaveHatchTest();
-            //WriteDxfFile();
-            //ReadDxfFile();
-            //ExplodeTest();
-            //HatchTestLinesBoundary();
-            //HatchTest1();
-            //HatchTest2();
-            //HatchTest3();
-            //HatchTest4();
-            //WriteNestedInsert();
-            //WritePolyfaceMesh();
-            //Ellipse();
-            //Solid();
-            //Face3d();
-            //LwPolyline();
-            //Polyline();
-            //Dxf2000();
-            //SpeedTest();
-            //WritePolyline3d();
-            //WriteInsert();
-
-            #endregion
+                Console.WriteLine("            Start\tFinal");
+                Console.WriteLine("Polylines:  " + startingLwPolylines + "\t\t" + lwPolylines.Count());
+                Console.WriteLine("Room Tags:  " + startingRoomTags + "\t\t" + roomTags.Count());
+            }
         }
 
-        #region Samples for new and modified features 2.3.0
+        public static string[] GetLwPolylineXYLimits(LwPolyline lwPolyline)
+        {
+            bool initValues = true;
+            double minX = 0, minY = 0, maxX = 0, maxY = 0;
+            List<LwPolylineVertex> lwPolyineVerts = lwPolyline.Vertexes.ToList<LwPolylineVertex>();
+            foreach (LwPolylineVertex lwPolylineVert in lwPolyineVerts)
+            {
+                if (initValues)
+                {
+                    minX = lwPolylineVert.Position.X;
+                    maxX = minX;
+                    minY = lwPolylineVert.Position.Y;
+                    maxY = minY;
+                    initValues = false;
+                }
+                else
+                {
+                    double testX = lwPolylineVert.Position.X;
+                    if (minX > testX) minX = testX;
+                    else if (maxX < testX) maxX = testX;
+                    double testY = lwPolylineVert.Position.Y;
+                    if (minY > testY) minY = testY;
+                    else if (maxY < testY) maxY = testY;
+                }
+            }
+            string[] limits = { lwPolyline.Handle.ToString(), "" + minX, "" + minY, "" + maxX, "" + maxY };
+            return limits;
+        }
 
-        public static void ExplodeInsert()
+        public static bool PointWithinLimits(double X, double Y, double minX, double minY, double maxX, double maxY)
+        {
+            if (X > minX && X < maxX && Y > minY && Y < maxY) return true;
+            else return false;
+        }
+
+    #region Samples for new and modified features 2.3.0
+
+    //ExplodeInsert();
+    //TransformArc();
+    //TransformCircle();
+    //TransformLwPolyline();
+    //TransformEllipse();
+    //AddHeaderVariable();
+    //ViewportTransform();
+    //MLineMirrorAndExplode();
+    //ShapeMirror();
+    //TextMirror();
+    //MTextMirror();
+    //InsertMirror();
+    //LeaderMirror();
+
+    #endregion
+
+    #region Samples for new and modified features 2.2.1
+
+    //MTextParagraphFormatting();
+    //MTextCharacterFormatting();
+
+    #endregion
+
+    #region Samples for new and modified features 2.2.0
+
+    //AccessModelBlock();
+    //DimensionBlockGeneration();
+
+    #endregion
+
+    #region Samples for new and modified features 2.1.0
+
+    //Shape();
+    //ComplexLineType();
+    //TextStyle();
+    //ReadWriteFromStream();
+    //ReadWriteFromStream2();
+
+    #endregion
+
+    #region Samples for new and modified features 2.0.1
+
+    //DimensionUserTextWithTwoLines();
+
+    #endregion
+
+    #region Samples for new and modified features 2.0
+
+    //Polyline3dAddVertex();
+    //AcadTable();
+    //DimensionStyleOverrides();
+    //ResetLeaderAnnotationPosition();
+
+    #endregion
+
+    #region Samples for new and modified features 1.1.2
+
+    //LinearDimensionTest();
+    //AlignedDimensionTest();
+    //Angular2LineDimensionTest();
+    //Angular3PointDimensionTest();
+    //DiametricDimensionTest();
+    //RadialDimensionTest();
+    //OrdinateDimensionTest();
+
+    #endregion
+
+    #region Samples for new and modified features 1.1.0
+
+    //WipeoutEntity();
+    //ToleranceEntity();
+    //LeaderEntity();
+    //UnderlayEntity();
+    //SplineFitPoints();
+    //ImageClippingBoundary();
+
+    #endregion
+
+    #region Samples for new and modified features 1.0.2
+
+    //AssociativeHatches();
+    //TraceEntity();
+    //SolidEntity();
+
+    #endregion
+
+    #region Samples for new and modified features 1.0.0
+
+    //ModifyingDocumentEntities();
+    //ModifyingBlockProperties();
+    //ModifyingMLineStyles();
+    //DimensionsLinearAndAngularUnits();
+    //ModifyingDimensionGeometryAndStyle();
+    //ModifyingGroups();
+    //ModifyingXData();
+    //DimensionUserText();
+
+    #endregion
+
+    #region Samples for fixes, new and modified features 0.9.3
+
+    //RemoveBlock();
+    //LinearDimension();
+    //AlignedDimension();
+    //Angular2LineDimension();
+    //Angular3PointDimension();
+    //DiametricDimension();
+    //RadialDimension();
+    //OrdinateDimension();
+
+    #endregion
+
+    #region Samples for fixes, new and modified features 0.9.2
+
+    //NurbsEvaluator();
+    //XDataInformation();
+    //DynamicBlocks();
+
+    #endregion
+
+    #region Samples for fixes, new and modified features 0.9.1
+
+    //LoadAndSaveBlocks();
+
+    #endregion
+
+    #region Samples for fixes, new and modified features 0.9.0
+
+    //MakingGroups();
+    //CombiningTwoDrawings();
+    //BinaryChunkXData();
+    //BinaryDxfFiles();
+    //MeshEntity();
+
+    #endregion
+
+    #region Samples for new and modified features 0.8.0
+
+    //MTextEntity();
+    //TransparencySample();
+    //DocumentUnits();
+    //PaperSpace();
+    //BlockWithAttributes();
+
+    #endregion
+
+    #region other
+
+    //NestedBlock();
+    //DimensionNestedBlock();
+    //EncodingTest();
+    //CheckReferences();
+    //ComplexHatch();
+    //RayAndXLine();
+    //UserCoordinateSystems();
+    //ExplodeInsert();
+    //ImageUsesAndRemove();
+    //LayerAndLinetypesUsesAndRemove();
+    //TextAndDimensionStyleUsesAndRemove();
+    //MLineStyleUsesAndRemove();
+    //AppRegUsesAndRemove();
+    //ExplodePolyfaceMesh(); 
+    //ApplicationRegistries();
+    //TestOCStoWCS();
+    //WriteGradientPattern();
+    //WriteGroup();
+    //WriteMLine();
+    //ObjectVisibility();
+    //EntityTrueColor();
+    //EntityLineWeight();
+    //Text();
+    //WriteNoAsciiText();
+    //WriteSplineBoundaryHatch();
+    //WriteNoInsertBlock();
+    //WriteImage();
+    //AddAndRemove();
+    //LoadAndSave();
+    //CleanDrawing();
+    //OrdinateDimensionDrawing();
+    //Angular2LineDimensionDrawing();
+    //Angular3PointDimensionDrawing();
+    //DiametricDimensionDrawing();
+    //RadialDimensionDrawing();
+    //LinearDimensionDrawing();
+    //AlignedDimensionDrawing();
+    //WriteMText();
+    //LineWidth();
+    //HatchCircleBoundary();
+    //ToPolyline();
+    //FilesTest();
+    //CustomHatchPattern();
+    //LoadSaveHatchTest();
+    //WriteDxfFile();
+    //ReadDxfFile();
+    //ExplodeTest();
+    //HatchTestLinesBoundary();
+    //HatchTest1();
+    //HatchTest2();
+    //HatchTest3();
+    //HatchTest4();
+    //WriteNestedInsert();
+    //WritePolyfaceMesh();
+    //Ellipse();
+    //Solid();
+    //Face3d();
+    //LwPolyline();
+    //Polyline();
+    //Dxf2000();
+    //SpeedTest();
+    //WritePolyline3d();
+    //WriteInsert();
+
+    #endregion
+
+    #region Samples for new and modified features 2.3.0
+
+    public static void ExplodeInsert()
         {
             // create a block with all the drawing objects in the ModelSpace of the sample.dxf file
             Block block = Block.Load("sample.dxf", new List<string> {@".\Support"});
